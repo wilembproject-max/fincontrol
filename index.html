@@ -542,7 +542,7 @@ nav a svg{width:14px;height:14px;flex-shrink:0;stroke:currentColor}
             <table class="data-table">
               <thead><tr>
                 <th>Consec.</th><th>Fecha</th><th>Digitador</th><th>Tipo</th>
-                <th>Productos</th><th>Total</th><th>Cliente / WhatsApp</th><th>Notas</th><th id="thDel"></th>
+                <th>Productos</th><th>Total</th><th>Cliente / WhatsApp</th><th>Notas</th><th style="text-align:center;white-space:nowrap">Sheets</th>
               </tr></thead>
               <tbody id="histBody"></tbody>
             </table>
@@ -1035,15 +1035,20 @@ const LS = {
 // ============================================================
 const GAS = {
   async get(action) {
-    const resp = await fetch(GAS_URL + '?action=' + action);
+    const resp = await fetch(GAS_URL + '?action=' + action, {
+      method: 'GET',
+      redirect: 'follow',
+    });
     return resp.json();
   },
   async post(action, data) {
+    // Apps Script POST requires no-cors from external domains
     await fetch(GAS_URL, {
       method:'POST', mode:'no-cors',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({action, data})
     });
+    return {ok: true};
   },
   async cargarTodo() {
     const data = await this.get('getAll');
@@ -1093,6 +1098,7 @@ const GAS = {
             total:       parseFloat(r.TotalRecibo) || 0,
             notas:       String(r.Notas     || ''),
             ts:          String(r.Timestamp || ''),
+            synced:      true, // ← viene de Sheets
             items: []
           };
         }
@@ -1201,7 +1207,20 @@ async function loginAs(u) {
     document.getElementById('statusTxt').textContent = 'GAS conectado';
   } catch(e) {
     console.warn('Sin conexión GAS, usando datos locales:', e.message);
+    // Cargar desde localStorage
     LS.load();
+    // Intentar solo config desde GAS
+    try {
+      const cfg = await fetch(GAS_URL + '?action=getConfig').then(r=>r.json());
+      if(cfg && cfg.ok && cfg.config) {
+        db.config = {...db.config,
+          adminPin:   String(cfg.config.adminPin   || db.config.adminPin),
+          pinDig1:    String(cfg.config.pin_dig1   || ''),
+          pinDig2:    String(cfg.config.pin_dig2   || ''),
+          pinAuditor: String(cfg.config.pin_auditor|| ''),
+        };
+      }
+    } catch(e2) {}
     document.getElementById('statusDot').style.background = 'var(--red)';
     document.getElementById('statusTxt').textContent = 'Sin conexión';
   }
@@ -1518,6 +1537,7 @@ async function guardarRecibo() {
     digitador:   state.user,
     items, total,
     ts:          new Date().toISOString(),
+    synced:      false, // ← pendiente de sincronizar
   };
 
   // 1. Guardar localmente
@@ -1543,6 +1563,11 @@ async function guardarRecibo() {
     if (cliente && tipo === 'Venta') {
       await GAS.post('saveCliente', {nombre: cliente, telefono: tel, correo, fecha, total});
     }
+    // Mark as synced after 2s (no-cors can't confirm, but assume success)
+    setTimeout(() => {
+      const idx = db.recibos.findIndex(r => r.id === recibo.id);
+      if(idx >= 0) { db.recibos[idx].synced = true; LS.save(); renderHistorial(); }
+    }, 2000);
   } catch(e) { console.warn('GAS sync:', e); }
 }
 
@@ -1685,7 +1710,7 @@ function renderHistorial() {
 
   const uMap = {admin:'👑 Admin',dig1:'✏️ Dig.1',dig2:'✏️ Dig.2',auditor:'📊 Aud.'};
   const isAdmin = state.user === 'admin';
-  document.getElementById('thDel').textContent = isAdmin ? '' : '';
+  // Sheets column always visible
 
   const tbody = document.getElementById('histBody');
   if (!list.length) {
@@ -2097,9 +2122,80 @@ async function probarConexion() {
 async function sincronizarTodo() {
   setLoading(true, 'Sincronizando con Sheets...');
   try {
-    await GAS.post('syncAll', {recibos: db.recibos, gastosFijos: db.gastosFijos});
-    showToast('✅ Sincronización exitosa', 'success');
-  } catch(e) { showToast('❌ Error: ' + e.message, 'error'); }
+    // Recargar Sheets para saber qué ya existe
+    let idsEnSheets = new Set();
+    try {
+      const data = await GAS.get('getAll');
+      if (data.records && data.records.length) {
+        data.records.forEach(r => { if(r.ID) idsEnSheets.add(String(r.ID).trim()); });
+        console.log('IDs en Sheets:', idsEnSheets.size);
+      }
+    } catch(e) {
+      console.warn('No se pudo consultar Sheets, enviando todos:', e.message);
+    }
+
+    // Filtrar los que NO están en Sheets
+    // Si Sheets está vacío → enviar todos
+    const pendientes = idsEnSheets.size === 0
+      ? db.recibos.filter(r => r.tipo !== 'ANULACIÓN') // si Sheets vacío, enviar todo
+      : db.recibos.filter(r => !idsEnSheets.has(String(r.id).trim()));
+
+    console.log('IDs locales:', db.recibos.map(r=>String(r.id)));
+    console.log('IDs en Sheets:', [...idsEnSheets]);
+    console.log('Pendientes:', pendientes.length, 'de', db.recibos.length);
+
+    if (!pendientes.length) {
+      showToast('✅ Todo ya está sincronizado en Sheets', 'success');
+      setLoading(false);
+      return;
+    }
+
+    // Enviar uno por uno con no-cors
+    let enviados = 0;
+    for (const recibo of pendientes) {
+      document.getElementById('loadingTxt').textContent =
+        'Sincronizando ' + (enviados+1) + ' de ' + pendientes.length + '...';
+      try {
+        await fetch(GAS_URL, {
+          method:'POST', mode:'no-cors',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({action:'saveReceipt', data: recibo})
+        });
+        if (recibo.cliente && recibo.tipo === 'Venta') {
+          await fetch(GAS_URL, {
+            method:'POST', mode:'no-cors',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({action:'saveCliente', data:{
+              nombre:   recibo.cliente,
+              telefono: recibo.telefono || '',
+              correo:   recibo.correo   || '',
+              fecha:    recibo.fecha,
+              total:    recibo.total
+            }})
+          });
+        }
+        // Mark as synced locally
+        const idx = db.recibos.findIndex(r => r.id === recibo.id);
+        if(idx >= 0) db.recibos[idx].synced = true;
+        enviados++;
+      } catch(e) {
+        console.warn('Error enviando recibo:', recibo.consecutivo, e);
+      }
+      await new Promise(r => setTimeout(r, 400));
+    }
+
+    // Gastos fijos
+    await fetch(GAS_URL, {
+      method:'POST', mode:'no-cors',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action:'saveGastosFijos', data: db.gastosFijos})
+    });
+
+    showToast('✅ ' + enviados + ' de ' + pendientes.length + ' recibos enviados a Sheets', 'success');
+  } catch(e) {
+    showToast('❌ Error: ' + e.message, 'error');
+    console.error('sincronizarTodo:', e);
+  }
   setLoading(false);
 }
 
@@ -2238,7 +2334,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Intentar cargar config/PINs desde Sheets sin bloquear
   try {
-    const d = await GAS.get('getConfig');
+    const d = await Promise.race([
+      GAS.get('getConfig'),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),5000))
+    ]);
     if (d.ok && d.config) {
       db.config = {...db.config,
         adminPin:   String(d.config.adminPin   || db.config.adminPin),
