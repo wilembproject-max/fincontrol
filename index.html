@@ -904,8 +904,21 @@ nav a svg{width:14px;height:14px;flex-shrink:0;stroke:currentColor}
 
           <!-- Gastos fijos -->
           <div class="admin-card">
-            <div class="admin-card-hdr">💸 Gastos Fijos Mensuales</div>
+            <div class="admin-card-hdr">💸 Gastos Fijos Mensuales por Año</div>
             <div class="admin-card-body">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                <div class="form-group" style="flex:1;margin-bottom:0">
+                  <label>Año</label>
+                  <select id="gfAnioSelector" onchange="renderGastosFijosAdmin()" style="background:var(--input);border:1px solid var(--border2);border-radius:var(--r);padding:7px 10px;color:var(--text);font-size:13px;width:100%">
+                    <option value="2026">2026</option>
+                    <option value="2025">2025</option>
+                    <option value="2024">2024</option>
+                    <option value="2023">2023</option>
+                    <option value="2022">2022</option>
+                  </select>
+                </div>
+                <button class="btn-primary" style="margin-top:14px;white-space:nowrap" onclick="copiarGFDelAnio()">📋 Copiar de otro año</button>
+              </div>
               <div class="tbl-wrap"><table class="data-table" style="min-width:0">
                 <thead><tr><th>#</th><th>Descripción</th><th>Monto $</th></tr></thead>
                 <tbody id="gfTable"></tbody>
@@ -959,7 +972,7 @@ nav a svg{width:14px;height:14px;flex-shrink:0;stroke:currentColor}
 //  Arquitectura: Sheets como fuente de verdad
 // ============================================================
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyyB2njM1Tb8VF862hJwJYI4BGLHiREZZectPIL4RrplTg3nJOyip8BuV1KMiOmWuzA/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyEpoPw2_XfpqRSsldcinZ3zQu2U9uwBKdTo6eCUhK48S_UInm4rdRFlpo7xAW4ben6/exec';
 
 // ── GASTOS FIJOS REALES WILEMPROJECT ──
 // GASTOS FIJOS: ya están incluidos en el costo de producción de cada producto
@@ -989,7 +1002,8 @@ let db = {
   recibos:     [],
   productos:   [],
   clientes:    [],
-  gastosFijos: [...GF_DEFAULT],
+  gastosFijos: [...GF_DEFAULT],      // GF del año actual (compatibilidad)
+  gastosFijosPorAnio: {},            // { 2026: [...], 2025: [...], ... }
   config: {
     gasUrl:    GAS_URL,
     adminPin:  '1313',
@@ -1076,6 +1090,7 @@ const LS = {
       localStorage.setItem('wfp_productos',   JSON.stringify(db.productos));
       localStorage.setItem('wfp_clientes',    JSON.stringify(db.clientes));
       localStorage.setItem('wfp_gastosFijos', JSON.stringify(db.gastosFijos));
+      localStorage.setItem('wfp_gfPorAnio',   JSON.stringify(db.gastosFijosPorAnio));
       localStorage.setItem('wfp_config',      JSON.stringify(db.config));
     } catch(e) { console.warn('LS.save:', e); }
   },
@@ -1085,6 +1100,12 @@ const LS = {
       const p = localStorage.getItem('wfp_productos'); if(p) db.productos    = JSON.parse(p);
       const c = localStorage.getItem('wfp_clientes');  if(c) db.clientes     = JSON.parse(c);
       const g = localStorage.getItem('wfp_gastosFijos');if(g) db.gastosFijos = JSON.parse(g);
+      const gpa = localStorage.getItem('wfp_gfPorAnio');if(gpa) db.gastosFijosPorAnio = JSON.parse(gpa);
+      // Sync año actual
+      const anioAct = new Date().getFullYear();
+      if (!db.gastosFijosPorAnio[anioAct] && db.gastosFijos.length) {
+        db.gastosFijosPorAnio[anioAct] = db.gastosFijos;
+      }
       const cfg = localStorage.getItem('wfp_config'); if(cfg) db.config = {...db.config, ...JSON.parse(cfg)};
     } catch(e) { console.warn('LS.load:', e); }
   },
@@ -1176,11 +1197,25 @@ const GAS = {
       db.recibos = Object.values(map);
     }
 
-    // Gastos Fijos
+    // Gastos Fijos por Año
     if (data.gastosFijos && data.gastosFijos.length) {
-      db.gastosFijos = data.gastosFijos
+      // Agrupar por año
+      db.gastosFijosPorAnio = {};
+      data.gastosFijos
         .filter(g => g.Descripcion)
-        .map(g => ({desc: String(g.Descripcion), monto: parseFloat(g.MontoMensual)||0}));
+        .forEach(g => {
+          const anio = parseInt(g.Anio) || 2026;
+          if (!db.gastosFijosPorAnio[anio]) db.gastosFijosPorAnio[anio] = [];
+          db.gastosFijosPorAnio[anio].push({
+            desc:  String(g.Descripcion),
+            monto: parseFloat(g.MontoMensual) || 0,
+          });
+        });
+      // Compatibilidad: db.gastosFijos = año actual
+      const anioActual = new Date().getFullYear();
+      db.gastosFijos = db.gastosFijosPorAnio[anioActual]
+        || db.gastosFijosPorAnio[Math.max(...Object.keys(db.gastosFijosPorAnio).map(Number))]
+        || [...GF_DEFAULT];
     }
 
     // Clientes
@@ -1200,6 +1235,24 @@ const GAS = {
     return true;
   }
 };
+
+// ============================================================
+//  GASTOS FIJOS POR AÑO — Helper
+// ============================================================
+function getGFParaAnio(anio) {
+  const a = parseInt(anio) || new Date().getFullYear();
+  if (db.gastosFijosPorAnio[a]) return db.gastosFijosPorAnio[a];
+  // Si no hay datos del año → usar el más cercano anterior
+  const anos = Object.keys(db.gastosFijosPorAnio).map(Number).sort((a,b)=>b-a);
+  for (const ano of anos) {
+    if (ano <= a) return db.gastosFijosPorAnio[ano];
+  }
+  return db.gastosFijos; // fallback
+}
+
+function getTotalGFParaAnio(anio) {
+  return getGFParaAnio(anio).reduce((s,g)=>s+(g.monto||0),0);
+}
 
 // ============================================================
 //  AUTENTICACIÓN
@@ -1931,9 +1984,9 @@ function renderInforme() {
   const totalV  = vs.reduce((s,r)=>s+r.total,0);
   const costoP  = vs.reduce((s,r)=>s+r.items.reduce((ss,it)=>ss+(it.costo||0),0),0);
   const gastD   = gs.reduce((s,r)=>s+r.total,0);
-  const gf      = db.gastosFijos.reduce((s,g)=>s+(g.monto||0),0);
+  const anioInf = ym.substring(0,4);
+  const gf      = getTotalGFParaAnio(anioInf);
   const bruta   = totalV - costoP;
-  // GF son gastos fijos reales del mes
   const neta    = bruta - gastD - gf;
 
   // Ganancia bruta = ventas - materiales
@@ -2057,11 +2110,10 @@ function renderBalance() {
   const costoP  = ventas.reduce((s,r)=>s+r.items.reduce((ss,it)=>ss+(it.costo||0),0),0);
   const gastD   = gastos.reduce((s,r)=>s+r.total,0);
   const dias       = getHabilesEnRango(desde,hasta);
-  const totalGFMes = db.gastosFijos.reduce((s,g)=>s+(g.monto||0),0);
-  // Card: proporcional al período (cuánto corresponde pagar en estos días)
-  const gfProrr    = (totalGFMes / DIAS_HABILES_MES) * Math.min(dias, DIAS_HABILES_MES);
-  // Barras: siempre el mes completo (referencia visual)
-  const gfBarras   = totalGFMes;
+  const anioBalance = desde.substring(0,4);
+  const totalGFMes  = getTotalGFParaAnio(anioBalance);
+  const gfProrr     = (totalGFMes / DIAS_HABILES_MES) * Math.min(dias, DIAS_HABILES_MES);
+  const gfBarras    = totalGFMes;
   // NOTA: gfProrr NO se resta de neta porque ya está en costoP
   const bruta   = totalV - costoP;
   // GF son costos fijos reales del mes
@@ -2183,6 +2235,9 @@ function renderSemaforo(hoyV) {
 // ============================================================
 function cargarConfigAdmin() {
   document.getElementById('gasUrlField').value = db.config.gasUrl || GAS_URL;
+  // Set año actual en selector
+  const sel = document.getElementById('gfAnioSelector');
+  if (sel) sel.value = new Date().getFullYear();
   document.getElementById('pinAdmin').value    = db.config.adminPin   || '';
   document.getElementById('pinDig1').value     = db.config.pinDig1    || '';
   document.getElementById('pinDig2').value     = db.config.pinDig2    || '';
@@ -2320,27 +2375,71 @@ async function recargarTodo() {
 }
 
 // ── Gastos Fijos Admin ──
+function getAnioSeleccionado() {
+  const sel = document.getElementById('gfAnioSelector');
+  return sel ? parseInt(sel.value) : new Date().getFullYear();
+}
+
 function renderGastosFijosAdmin() {
+  const anio  = getAnioSeleccionado();
+  const gfs   = db.gastosFijosPorAnio[anio] || [];
   const tbody = document.getElementById('gfTable');
-  tbody.innerHTML = db.gastosFijos.map((g,i)=>`
+
+  // Si no hay datos para este año → mostrar plantilla vacía con los GF del año más reciente
+  const lista = gfs.length > 0 ? gfs : getGFParaAnio(anio).map(g=>({...g}));
+
+  tbody.innerHTML = lista.map((g,i)=>`
     <tr>
       <td style="text-align:center;color:var(--text3);font-size:12px">${i+1}</td>
-      <td><input type="text" value="${g.desc||''}" oninput="db.gastosFijos[${i}].desc=this.value" style="background:transparent;border:none;color:var(--text);width:100%"></td>
-      <td><input type="number" value="${g.monto||0}" oninput="db.gastosFijos[${i}].monto=parseFloat(this.value)||0;actualizarTotalGF()" style="background:transparent;border:none;color:var(--accent);width:100px"></td>
+      <td><input type="text" value="${g.desc||''}" oninput="setGFDesc(${anio},${i},this.value)" style="background:transparent;border:none;color:var(--text);width:100%"></td>
+      <td><input type="number" value="${g.monto||0}" oninput="setGFMonto(${anio},${i},parseFloat(this.value)||0)" style="background:transparent;border:none;color:var(--accent);width:110px"></td>
     </tr>`).join('');
+
+  // Asegurar que exista en db
+  if (!db.gastosFijosPorAnio[anio]) db.gastosFijosPorAnio[anio] = lista;
+  actualizarTotalGF();
+}
+
+function setGFDesc(anio, idx, val) {
+  if (!db.gastosFijosPorAnio[anio]) db.gastosFijosPorAnio[anio] = [];
+  if (db.gastosFijosPorAnio[anio][idx]) db.gastosFijosPorAnio[anio][idx].desc = val;
+  // sync db.gastosFijos si es año actual
+  if (anio === new Date().getFullYear()) db.gastosFijos = db.gastosFijosPorAnio[anio];
+}
+
+function setGFMonto(anio, idx, val) {
+  if (!db.gastosFijosPorAnio[anio]) db.gastosFijosPorAnio[anio] = [];
+  if (db.gastosFijosPorAnio[anio][idx]) db.gastosFijosPorAnio[anio][idx].monto = val;
+  if (anio === new Date().getFullYear()) db.gastosFijos = db.gastosFijosPorAnio[anio];
   actualizarTotalGF();
 }
 
 function actualizarTotalGF() {
-  const total = db.gastosFijos.reduce((s,g)=>s+(g.monto||0),0);
+  const anio  = getAnioSeleccionado();
+  const lista = db.gastosFijosPorAnio[anio] || [];
+  const total = lista.reduce((s,g)=>s+(g.monto||0),0);
   document.getElementById('gfTotal').textContent = fmtCur(total);
 }
 
+function copiarGFDelAnio() {
+  const anioDestino = getAnioSeleccionado();
+  const anos = Object.keys(db.gastosFijosPorAnio).map(Number)
+    .filter(a => a !== anioDestino).sort((a,b)=>b-a);
+  if (!anos.length) { showToast('No hay otros años disponibles','error'); return; }
+  const anioOrigen = anos[0];
+  if (!confirm(`¿Copiar GF de ${anioOrigen} a ${anioDestino}? Puedes editar los montos después.`)) return;
+  db.gastosFijosPorAnio[anioDestino] = db.gastosFijosPorAnio[anioOrigen].map(g=>({...g}));
+  renderGastosFijosAdmin();
+  showToast(`✅ GF copiados de ${anioOrigen} a ${anioDestino}`, 'success');
+}
+
 async function guardarGastosFijosEnSheets() {
+  const anio  = getAnioSeleccionado();
+  const lista = db.gastosFijosPorAnio[anio] || [];
   LS.save();
   try {
-    await GAS.post('saveGastosFijos', db.gastosFijos);
-    showToast('✅ Gastos fijos guardados en Sheets', 'success');
+    await GAS.post('saveGastosFijos', { anio, gastos: lista });
+    showToast('✅ Gastos fijos ' + anio + ' guardados en Sheets', 'success');
   } catch(e) { showToast('❌ Error: ' + e.message, 'error'); }
 }
 
@@ -2495,7 +2594,8 @@ function renderEjecutivo() {
     fmtFecha(desde) + ' → ' + fmtFecha(hasta);
 
   // Calcular datos por mes
-  const gfMes = db.gastosFijos.reduce((s,g)=>s+(g.monto||0),0);
+  const anioExec = meses[0].substring(0,4);
+  const gfMes    = getTotalGFParaAnio(anioExec);
   const dataMeses = meses.map(ym => {
     const vs    = db.recibos.filter(r=>r.tipo==='Venta' && r.fecha?.startsWith(ym));
     const gs    = db.recibos.filter(r=>r.tipo==='Gasto' && r.fecha?.startsWith(ym));
