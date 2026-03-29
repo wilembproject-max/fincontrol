@@ -2107,11 +2107,21 @@ function renderBalance() {
   const totalV  = ventas.reduce((s,r)=>s+r.total,0) + anulaciones.reduce((s,r)=>s+r.total,0);
   const costoP  = ventas.reduce((s,r)=>s+r.items.reduce((ss,it)=>ss+(it.costo||0),0),0);
   const gastD   = gastos.reduce((s,r)=>s+r.total,0);
-  const dias       = getHabilesEnRango(desde,hasta);
+  const dias        = getHabilesEnRango(desde,hasta);
   const anioBalance = desde.substring(0,4);
   const totalGFMes  = getTotalGFParaAnio(anioBalance);
-  const gfProrr     = (totalGFMes / DIAS_HABILES_MES) * Math.min(dias, DIAS_HABILES_MES);
-  const gfBarras    = totalGFMes;
+
+  // Calcular cuántos meses cubre el período seleccionado
+  const dDesde  = new Date(desde);
+  const dHasta  = new Date(hasta);
+  const meses   = (dHasta.getFullYear() - dDesde.getFullYear()) * 12
+                + (dHasta.getMonth() - dDesde.getMonth())
+                + (dHasta.getDate() >= dDesde.getDate() ? 1 : 0);
+  const mesesReales = Math.max(1, meses);
+
+  // GF proporcionales al período real
+  const gfProrr  = totalGFMes * mesesReales;
+  const gfBarras = totalGFMes * mesesReales;
   // NOTA: gfProrr NO se resta de neta porque ya está en costoP
   const bruta   = totalV - costoP;
   // GF son costos fijos reales del mes
