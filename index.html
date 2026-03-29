@@ -972,7 +972,7 @@ nav a svg{width:14px;height:14px;flex-shrink:0;stroke:currentColor}
 //  Arquitectura: Sheets como fuente de verdad
 // ============================================================
 
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyEpoPw2_XfpqRSsldcinZ3zQu2U9uwBKdTo6eCUhK48S_UInm4rdRFlpo7xAW4ben6/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbwSc4kOVLnh9OrUyvMkyRwt0pqCYhv9V8jtbcZuh0EE7St7rr-HAZCn_uS1ALMgqhKi/exec';
 
 // ── GASTOS FIJOS REALES WILEMPROJECT ──
 // GASTOS FIJOS: ya están incluidos en el costo de producción de cada producto
@@ -1177,8 +1177,6 @@ const GAS = {
             fecha:       toYMD(r.Fecha),
             tipo:        String(r.Tipo      || ''),
             cliente:     String(r.Cliente   || ''),
-            telefono:    String(r.Telefono  || ''),
-            correo:      String(r.Correo    || ''),
             digitador:   String(r.Digitador || ''),
             total:       parseFloat(r.TotalRecibo) || 0,
             notas:       String(r.Notas     || ''),
