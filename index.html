@@ -1527,6 +1527,7 @@ function showTab(tab) {
   if (tab === 'informe')   setTimeout(renderInforme,   50);
   if (tab === 'balance')   setTimeout(renderBalance,   50);
   if (tab === 'clientes')  setTimeout(renderClientes,  50);
+  if (tab === 'agregar-cliente') setTimeout(renderAgregarClienteRecientes, 50);
   if (tab === 'historial') renderHistorial();
 }
 
@@ -1821,13 +1822,14 @@ function renderClientes() {
   }).join('');
 }
 
-function guardarClienteTab() {
+async function guardarClienteTab() {
   const nombre = (document.getElementById('ac_nombre').value || '').trim();
   const tel    = (document.getElementById('ac_tel').value    || '').trim().replace(/\D/g,'');
   const correo = (document.getElementById('ac_correo').value || '').trim().toLowerCase();
 
   if (!nombre) { showToast('⚠️ El nombre es obligatorio', 'error'); document.getElementById('ac_nombre').focus(); return; }
 
+  const fecha = todayYMD();
   const existe = db.clientes.find(c => c.nombre.toLowerCase() === nombre.toLowerCase());
   if (existe) {
     if (tel    && !existe.telefono) existe.telefono = tel;
@@ -1839,6 +1841,11 @@ function guardarClienteTab() {
     LS.save();
     showToast('✅ Cliente "' + nombre + '" guardado', 'success');
   }
+  // Sincronizar con Google Sheets
+  try {
+    await GAS.post('saveCliente', { nombre, telefono: tel, correo, fecha, total: 0 });
+  } catch(e) { console.warn('GAS sync cliente:', e); }
+
   limpiarFormCliente();
   renderAgregarClienteRecientes();
 }
@@ -1865,16 +1872,16 @@ function renderAgregarClienteRecientes() {
   </tr>`).join('');
 }
 
-function agregarClienteManual() {
+async function agregarClienteManual() {
   const nombre = (document.getElementById('newCli_nombre').value || '').trim();
   const tel    = (document.getElementById('newCli_tel').value    || '').trim().replace(/\D/g,'');
   const correo = (document.getElementById('newCli_correo').value || '').trim().toLowerCase();
 
   if (!nombre) { showToast('⚠️ El nombre es obligatorio', 'error'); document.getElementById('newCli_nombre').focus(); return; }
 
+  const fecha = todayYMD();
   const existe = db.clientes.find(c => c.nombre.toLowerCase() === nombre.toLowerCase());
   if (existe) {
-    // Actualizar datos faltantes si se proveen
     if (tel    && !existe.telefono) existe.telefono = tel;
     if (correo && !existe.correo)   existe.correo   = correo;
     LS.save();
@@ -1886,6 +1893,10 @@ function agregarClienteManual() {
     renderClientes();
     showToast('✅ Cliente "' + nombre + '" agregado', 'success');
   }
+  // Sincronizar con Google Sheets
+  try {
+    await GAS.post('saveCliente', { nombre, telefono: tel, correo, fecha, total: 0 });
+  } catch(e) { console.warn('GAS sync cliente:', e); }
 
   // Limpiar campos
   document.getElementById('newCli_nombre').value = '';
