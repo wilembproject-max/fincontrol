@@ -378,6 +378,8 @@ nav a svg{width:14px;height:14px;flex-shrink:0;stroke:currentColor}
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Informe Mensual</a>
       <a data-tab="balance" onclick="showTab('balance')" id="navBalance" style="display:none">
         <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Balance Financiero</a>
+      <a data-tab="agregar-cliente" onclick="showTab('agregar-cliente')" id="navAgregarCliente">
+        <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>Agregar Cliente</a>
       <a data-tab="clientes" onclick="showTab('clientes')" id="navClientes" style="display:none">
         <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>Clientes CRM</a>
       <a data-tab="ejecutivo" onclick="showTab('ejecutivo')" id="navEjecutivo" style="display:none">
@@ -740,6 +742,49 @@ nav a svg{width:14px;height:14px;flex-shrink:0;stroke:currentColor}
             <thead><tr><th>Fecha</th><th>Ventas</th><th>Gastos</th><th>G. Bruta</th><th>Meta</th><th>Estado</th></tr></thead>
             <tbody id="balDiario"></tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- ===== TAB: AGREGAR CLIENTE ===== -->
+      <section id="tab-agregar-cliente" class="tab-content">
+        <div style="max-width:520px;margin:0 auto">
+          <div class="form-section">
+            <div class="section-title"><div class="fdot"></div>Registrar Nuevo Cliente</div>
+            <div class="form-row">
+              <div class="form-group" style="grid-column:1/-1">
+                <label>Nombre completo <span style="color:var(--red)">*</span></label>
+                <input type="text" id="ac_nombre" placeholder="Nombre del cliente..." autocomplete="off">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Celular <span style="color:var(--text3)">(WhatsApp)</span></label>
+                <input type="tel" id="ac_tel" placeholder="3001234567" maxlength="15">
+              </div>
+              <div class="form-group">
+                <label>Correo <span style="color:var(--text3)">(opcional)</span></label>
+                <input type="email" id="ac_correo" placeholder="cliente@email.com">
+              </div>
+            </div>
+            <div class="action-row" style="margin-top:8px">
+              <button class="btn-secondary" onclick="limpiarFormCliente()">Limpiar</button>
+              <button class="btn-primary" onclick="guardarClienteTab()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                Guardar Cliente
+              </button>
+            </div>
+          </div>
+
+          <!-- Mini listado recientes -->
+          <div class="table-container">
+            <div class="table-header"><h3>👥 Clientes Recientes</h3></div>
+            <div class="tbl-wrap">
+              <table class="data-table" style="min-width:0">
+                <thead><tr><th>Nombre</th><th>Teléfono</th><th>Correo</th></tr></thead>
+                <tbody id="acRecentBody"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1396,6 +1441,7 @@ async function loginAs(u) {
   } else {
     hide('navGraficas'); hide('navInforme'); hide('navBalance');
     hide('navClientes'); hide('navAdmin');
+    show('navAgregarCliente');
   }
 
   // Cerrar login, mostrar app
@@ -1436,7 +1482,7 @@ function logout() {
   document.getElementById('invRows').innerHTML = '';
   rowCount = 0;
   // Reset nav - mostrar Nueva y Historial, ocultar el resto
-  ['navGraficas','navInforme','navBalance','navClientes','navAdmin','navEjecutivo']
+  ['navGraficas','navInforme','navBalance','navClientes','navAdmin','navEjecutivo','navAgregarCliente']
     .forEach(id => { const el=document.getElementById(id); if(el) el.style.display='none'; });
   // Restaurar Nueva Entrada e Historial para el próximo login
   const aNueva = document.querySelector('nav a[data-tab="nueva"]');
@@ -1452,6 +1498,7 @@ function logout() {
 //  NAVEGACIÓN
 // ============================================================
 const tabMeta = {
+  'agregar-cliente':['Agregar Cliente',      'Registrar nuevo cliente en la base de datos'],
   nueva:    ['Nueva Entrada',         'Registro de recibos y transacciones'],
   historial:['Historial',             'Todos los registros guardados'],
   graficas: ['Gráficas & Estadísticas','Análisis financiero visual'],
@@ -1772,6 +1819,50 @@ function renderClientes() {
       </td>
     </tr>`;
   }).join('');
+}
+
+function guardarClienteTab() {
+  const nombre = (document.getElementById('ac_nombre').value || '').trim();
+  const tel    = (document.getElementById('ac_tel').value    || '').trim().replace(/\D/g,'');
+  const correo = (document.getElementById('ac_correo').value || '').trim().toLowerCase();
+
+  if (!nombre) { showToast('⚠️ El nombre es obligatorio', 'error'); document.getElementById('ac_nombre').focus(); return; }
+
+  const existe = db.clientes.find(c => c.nombre.toLowerCase() === nombre.toLowerCase());
+  if (existe) {
+    if (tel    && !existe.telefono) existe.telefono = tel;
+    if (correo && !existe.correo)   existe.correo   = correo;
+    LS.save();
+    showToast('ℹ️ Cliente ya existía — datos actualizados', 'success');
+  } else {
+    db.clientes.push({ nombre, telefono: tel, correo, compras: 0, totalComprado: 0, ultimaCompra: '' });
+    LS.save();
+    showToast('✅ Cliente "' + nombre + '" guardado', 'success');
+  }
+  limpiarFormCliente();
+  renderAgregarClienteRecientes();
+}
+
+function limpiarFormCliente() {
+  document.getElementById('ac_nombre').value = '';
+  document.getElementById('ac_tel').value    = '';
+  document.getElementById('ac_correo').value = '';
+  document.getElementById('ac_nombre').focus();
+}
+
+function renderAgregarClienteRecientes() {
+  const tbody = document.getElementById('acRecentBody');
+  if (!tbody) return;
+  const recientes = [...db.clientes].slice(-8).reverse();
+  if (!recientes.length) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:20px;color:var(--text3)">Aún no hay clientes registrados</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = recientes.map(c => `<tr>
+    <td><strong>${c.nombre}</strong></td>
+    <td style="font-size:12px">${c.telefono || '—'}</td>
+    <td style="font-size:12px">${c.correo   || '—'}</td>
+  </tr>`).join('');
 }
 
 function agregarClienteManual() {
