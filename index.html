@@ -750,6 +750,32 @@ nav a svg{width:14px;height:14px;flex-shrink:0;stroke:currentColor}
           <div class="crm-stat"><div class="cs-val" id="crmWa">0</div><div class="cs-lab">Con WhatsApp</div></div>
           <div class="crm-stat"><div class="cs-val" id="crmMail">0</div><div class="cs-lab">Con Correo</div></div>
         </div>
+
+        <!-- ── REGISTRO RÁPIDO DE CLIENTE ── -->
+        <div class="form-section" style="margin-bottom:16px">
+          <div class="section-title"><div class="fdot"></div>Agregar Cliente Manualmente</div>
+          <div class="form-row" style="align-items:flex-end">
+            <div class="form-group">
+              <label>Nombre <span style="color:var(--red)">*</span></label>
+              <input type="text" id="newCli_nombre" placeholder="Nombre completo del cliente..." autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label>Celular <span style="color:var(--text3)">(WhatsApp)</span></label>
+              <input type="tel" id="newCli_tel" placeholder="3001234567" maxlength="15">
+            </div>
+            <div class="form-group">
+              <label>Correo <span style="color:var(--text3)">(opcional)</span></label>
+              <input type="email" id="newCli_correo" placeholder="cliente@email.com">
+            </div>
+            <div class="form-group" style="flex:0 0 auto;min-width:0">
+              <button class="btn-primary" onclick="agregarClienteManual()" style="white-space:nowrap;width:100%">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                Agregar Cliente
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
           <input type="text" id="crmSearch" placeholder="🔍 Buscar por nombre, teléfono o correo..." oninput="renderClientes()" style="flex:1;min-width:200px">
           <button class="btn-success" onclick="exportarListaWA()">📋 Copiar lista WA</button>
@@ -1746,6 +1772,35 @@ function renderClientes() {
       </td>
     </tr>`;
   }).join('');
+}
+
+function agregarClienteManual() {
+  const nombre = (document.getElementById('newCli_nombre').value || '').trim();
+  const tel    = (document.getElementById('newCli_tel').value    || '').trim().replace(/\D/g,'');
+  const correo = (document.getElementById('newCli_correo').value || '').trim().toLowerCase();
+
+  if (!nombre) { showToast('⚠️ El nombre es obligatorio', 'error'); document.getElementById('newCli_nombre').focus(); return; }
+
+  const existe = db.clientes.find(c => c.nombre.toLowerCase() === nombre.toLowerCase());
+  if (existe) {
+    // Actualizar datos faltantes si se proveen
+    if (tel    && !existe.telefono) existe.telefono = tel;
+    if (correo && !existe.correo)   existe.correo   = correo;
+    LS.save();
+    renderClientes();
+    showToast('ℹ️ Cliente ya existía — datos actualizados', 'success');
+  } else {
+    db.clientes.push({ nombre, telefono: tel, correo, compras: 0, totalComprado: 0, ultimaCompra: '' });
+    LS.save();
+    renderClientes();
+    showToast('✅ Cliente "' + nombre + '" agregado', 'success');
+  }
+
+  // Limpiar campos
+  document.getElementById('newCli_nombre').value = '';
+  document.getElementById('newCli_tel').value    = '';
+  document.getElementById('newCli_correo').value = '';
+  document.getElementById('newCli_nombre').focus();
 }
 
 function copiarCorreo(mail) {
