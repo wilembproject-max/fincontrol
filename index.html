@@ -1181,7 +1181,7 @@ const LS = {
     } catch(e) { console.warn('LS.load:', e); }
   },
   clear() {
-    ['wfp_recibos','wfp_productos','wfp_clientes','wfp_gastosFijos','wfp_config']
+    ['wfp_recibos','wfp_productos','wfp_clientes','wfp_gastosFijos','wfp_gfPorAnio','wfp_config']
       .forEach(k => localStorage.removeItem(k));
   }
 };
@@ -1271,12 +1271,14 @@ const GAS = {
       // Agrupar por año
       db.gastosFijosPorAnio = {};
       data.gastosFijos
-        .filter(g => g.Descripcion)
+        .filter(g => g.Descripcion && String(g.Descripcion).trim())
         .forEach(g => {
-          const anio = parseInt(g.Anio) || 2026;
+          // Sheets puede devolver el año como "Anio" o "anio" — intentar ambos
+          const anioRaw = g.Anio || g.anio;
+          const anio = parseInt(anioRaw) || new Date().getFullYear();
           if (!db.gastosFijosPorAnio[anio]) db.gastosFijosPorAnio[anio] = [];
           db.gastosFijosPorAnio[anio].push({
-            desc:  String(g.Descripcion),
+            desc:  String(g.Descripcion).trim(),
             monto: parseFloat(g.MontoMensual) || 0,
           });
         });
@@ -2509,12 +2511,14 @@ async function sincronizarTodo() {
       await new Promise(r => setTimeout(r, 400));
     }
 
-    // Gastos fijos
-    await fetch(GAS_URL, {
-      method:'POST', mode:'no-cors',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({action:'saveGastosFijos', data: db.gastosFijos})
-    });
+    // Gastos fijos — enviar un POST por cada año
+    for (const [anioStr, lista] of Object.entries(db.gastosFijosPorAnio)) {
+      await fetch(GAS_URL, {
+        method:'POST', mode:'no-cors',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({action:'saveGastosFijos', data: { anio: parseInt(anioStr), gastos: lista }})
+      });
+    }
 
     showToast('✅ ' + enviados + ' de ' + pendientes.length + ' recibos enviados a Sheets', 'success');
   } catch(e) {
@@ -2534,6 +2538,7 @@ async function recargarTodo() {
     renderGastosFijosAdmin();
     renderProdTable();
     renderClientes();
+    cargarConfigAdmin();
     showToast('✅ Datos recargados: ' + db.productos.length + ' productos, ' + db.recibos.length + ' recibos', 'success');
   } catch(e) { showToast('❌ Error: ' + e.message, 'error'); }
   setLoading(false);
